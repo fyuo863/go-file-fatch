@@ -132,8 +132,14 @@ func main() {
 
 	// 等待所有协程完成
 	wg.Wait()
+	close(errCh)
 	// for i := 0; i < a; i++ {
 	// 	<-c
 	// }
 	fmt.Println("下载完成")
+	for n := range errCh {
+		if n != nil {
+			fmt.Println("下载过程中发生错误:", n)
+		}
+	}
 }
