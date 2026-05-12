@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -10,7 +11,7 @@ import (
 	"time"
 )
 
-const a = 5
+const a = 10
 const url = "http://localhost:8090/multimedia-exp1.zip"
 
 var Resp struct {
@@ -38,7 +39,7 @@ func HEAD() *http.Response {
 	return resp
 }
 
-func GET(errCh chan error, start, end int) {
+func GET(errCh chan error, file *os.File, start, end int) {
 	// 创建一个 GET 请求
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -57,17 +58,28 @@ func GET(errCh chan error, start, end int) {
 		return
 	}
 	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		// 处理错误
+	}
+	//fmt.Println("分片数据长度:", len(data))
+	//fmt.Println("🍌", resp.Body)
 	if resp.StatusCode != http.StatusPartialContent {
 		fmt.Printf("请求分片失败: %d-%d, 状态码: %s\n", start, end, resp.Status)
 		errCh <- fmt.Errorf("分片 %d-%d 下载失败，状态码: %s", start, end, resp.Status)
 		return
 	}
 	// 模拟处理响应
-	fmt.Println("🍎", resp)
-	fmt.Printf("下载分片: %d-%d, 状态码: %s\n", start, end, resp.Status)
+	//fmt.Println("🍎", resp)
+	//fmt.Printf("下载分片: %d-%d, 状态码: %s\n", start, end, resp.Status)
+	_, err = file.WriteAt(data, int64(start))
+	if err != nil {
+		errCh <- fmt.Errorf("写入失败: %w", err)
+		return
+	}
 }
 
-func DownloadManager(errCh chan error, a int) {
+func DownloadManager(errCh chan error, file *os.File, a int) {
 	if Resp.AcceptRanges == "" {
 		fmt.Println("不支持断点续传，退化成普通下载")
 		a = 1
@@ -84,7 +96,7 @@ func DownloadManager(errCh chan error, a int) {
 		wg.Add(1)
 		go func(start, end int) {
 			defer wg.Done()
-			GET(errCh, start, end)
+			GET(errCh, file, start, end)
 		}(start, end)
 	}
 }
@@ -128,7 +140,11 @@ func main() {
 		fmt.Printf("%s: %s\n", key, values)
 	}
 	// 启动下载管理器
-	DownloadManager(errCh, a)
+	start := time.Now()
+	defer func() {
+		fmt.Printf("总耗时: %s\n", time.Since(start))
+	}()
+	DownloadManager(errCh, f, a)
 
 	// 等待所有协程完成
 	wg.Wait()
