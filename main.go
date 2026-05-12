@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,7 +16,7 @@ import (
 const (
 	threadCount = 10
 	// 建议换一个更稳定的链接测试，或者确保这个链接没过期
-	downloadUrl = "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
+	downloadUrl = "http://localhost:8090/multimedia-exp1.zip" //"http://localhost:8090/multimedia-exp1.zip"
 	userAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
@@ -24,16 +25,36 @@ var Resp struct {
 	ContentLength int
 }
 
+var realFileName string
+
 var wg sync.WaitGroup
 
-func HEAD() *http.Response {
+func getFileName(resp *http.Response, rawUrl string) string {
+	// 1. 尝试从 Header 中获取 (Content-Disposition: attachment; filename="docker.exe")
+	contentDisposition := resp.Header.Get("Content-Disposition")
+	if contentDisposition != "" {
+		parts := strings.Split(contentDisposition, "filename=")
+		if len(parts) > 1 {
+			return strings.Trim(parts[1], "\"")
+		}
+	}
+
+	// 2. 如果 Header 没有，从 URL 路径中提取
+	fileName := path.Base(rawUrl)
+	if fileName == "" || fileName == "." {
+		return "downloaded_file.bin" // 兜底名称
+	}
+	return fileName
+}
+
+func HEAD() (*http.Response, error) {
 	req, _ := http.NewRequest("GET", downloadUrl, nil)
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Range", "bytes=0-0")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -44,7 +65,7 @@ func HEAD() *http.Response {
 		_, err := strconv.Atoi(resp.Header.Get("Content-Length"))
 		if err != nil {
 			fmt.Println("转换 Content-Length 失败:", err)
-			return nil
+			return nil, err
 		}
 
 		test := resp.Header.Get("Content-Range")
@@ -55,6 +76,7 @@ func HEAD() *http.Response {
 			ContentLength, err := strconv.Atoi(totalSizeStr)
 			if err != nil {
 				fmt.Println("转换 Content-Length 失败:", err)
+				return nil, err
 			}
 			Resp.ContentLength = ContentLength
 		}
@@ -63,7 +85,8 @@ func HEAD() *http.Response {
 		Resp.AcceptRanges = http.StatusPartialContent
 		// 从 contentRange 中解析出总大小...
 	}
-	return resp
+	realFileName = getFileName(resp, downloadUrl)
+	return resp, err
 }
 
 func GET(errCh chan error, file *os.File, start, end int) {
@@ -133,21 +156,21 @@ func main() {
 	// 创建一个 HEAD 请求
 	errCh := make(chan error, threadCount)
 
-	resp := HEAD()
+	resp, err := HEAD()
 
 	fmt.Println("🍍", Resp)
 
 	if resp == nil {
-		fmt.Println("HEAD 请求失败")
+		fmt.Println("HEAD 请求失败", err)
 		return
 	}
 	defer resp.Body.Close()
 	//预分配磁盘空间与文件占位
-	f, err := os.Create("filename.zip")
+	var tmpFileName = "file_is_downloading.tmp"
+	f, err := os.Create(tmpFileName)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer f.Close()
 
 	fmt.Printf("resp:%T", Resp.ContentLength)
 	// 预分配磁盘空间（非常重要：防止下载中途磁盘满，且减少文件碎片）
@@ -172,10 +195,17 @@ func main() {
 	// 等待所有协程完成
 	wg.Wait()
 	close(errCh)
-	fmt.Println("下载完成")
+
 	for n := range errCh {
 		if n != nil {
 			fmt.Println("下载过程中发生错误:", n)
 		}
 	}
+	f.Close()
+	err = os.Rename(tmpFileName, realFileName)
+	if err != nil {
+		fmt.Printf("重命名失败: %v\n", err)
+		return
+	}
+	fmt.Println("下载完成")
 }
