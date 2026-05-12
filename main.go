@@ -7,47 +7,75 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
-const a = 10
-const url = "http://localhost:8090/multimedia-exp1.zip"
+const (
+	threadCount = 10
+	// 建议换一个更稳定的链接测试，或者确保这个链接没过期
+	downloadUrl = "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
+	userAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 var Resp struct {
-	AcceptRanges  string
+	AcceptRanges  uint
 	ContentLength int
 }
 
 var wg sync.WaitGroup
 
 func HEAD() *http.Response {
-	// 创建一个 HEAD 请求
-	req, err := http.NewRequest(http.MethodHead, url, nil)
+	req, _ := http.NewRequest("GET", downloadUrl, nil)
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Range", "bytes=0-0")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		fmt.Println("创建请求失败:", err)
 		return nil
 	}
-	// 创建 HTTP 客户端
-	client := &http.Client{}
-	// 发送请求
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println("请求失败:", err)
-		return nil
+	defer resp.Body.Close()
+
+	// 如果支持分块下载，状态码应该是 206 Partial Content
+	if resp.StatusCode == http.StatusPartialContent {
+		// 注意：此时 Content-Range 包含总大小，例如 "bytes 0-0/524288000"
+		// 而 Content-Length 只是当前这一小块的大小 (通常是 1)
+		_, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+		if err != nil {
+			fmt.Println("转换 Content-Length 失败:", err)
+			return nil
+		}
+
+		test := resp.Header.Get("Content-Range")
+		pos := strings.LastIndex(test, "/")
+		if pos != -1 {
+			totalSizeStr := test[pos+1:] // 截取斜杠之后的部分
+			fmt.Println("提取结果:", totalSizeStr)
+			ContentLength, err := strconv.Atoi(totalSizeStr)
+			if err != nil {
+				fmt.Println("转换 Content-Length 失败:", err)
+			}
+			Resp.ContentLength = ContentLength
+		}
+		fmt.Println("🌰:", test)
+
+		Resp.AcceptRanges = http.StatusPartialContent
+		// 从 contentRange 中解析出总大小...
 	}
 	return resp
 }
 
 func GET(errCh chan error, file *os.File, start, end int) {
 	// 创建一个 GET 请求
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequest(http.MethodGet, downloadUrl, nil)
 	if err != nil {
 		fmt.Println("创建请求失败:", err)
 		errCh <- err
 		return
 	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end)) // 请求从 start 字节到 end 字节的数据
+	req.Header.Set("User-Agent", userAgent)
 
 	// 创建 HTTP 客户端
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -80,7 +108,7 @@ func GET(errCh chan error, file *os.File, start, end int) {
 }
 
 func DownloadManager(errCh chan error, file *os.File, a int) {
-	if Resp.AcceptRanges == "" {
+	if Resp.AcceptRanges == 0 {
 		fmt.Println("不支持断点续传，退化成普通下载")
 		a = 1
 	}
@@ -103,9 +131,11 @@ func DownloadManager(errCh chan error, file *os.File, a int) {
 
 func main() {
 	// 创建一个 HEAD 请求
-	errCh := make(chan error, a)
+	errCh := make(chan error, threadCount)
 
 	resp := HEAD()
+
+	fmt.Println("🍍", Resp)
 
 	if resp == nil {
 		fmt.Println("HEAD 请求失败")
@@ -119,13 +149,6 @@ func main() {
 	}
 	defer f.Close()
 
-	ContentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
-	if err != nil {
-		fmt.Println("转换 Content-Length 失败:", err)
-		return
-	}
-	Resp.ContentLength = ContentLength
-	Resp.AcceptRanges = resp.Header.Get("Accept-Ranges")
 	fmt.Printf("resp:%T", Resp.ContentLength)
 	// 预分配磁盘空间（非常重要：防止下载中途磁盘满，且减少文件碎片）
 	err = f.Truncate(int64(Resp.ContentLength))
@@ -144,14 +167,11 @@ func main() {
 	defer func() {
 		fmt.Printf("总耗时: %s\n", time.Since(start))
 	}()
-	DownloadManager(errCh, f, a)
+	DownloadManager(errCh, f, threadCount)
 
 	// 等待所有协程完成
 	wg.Wait()
 	close(errCh)
-	// for i := 0; i < a; i++ {
-	// 	<-c
-	// }
 	fmt.Println("下载完成")
 	for n := range errCh {
 		if n != nil {
