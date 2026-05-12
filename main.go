@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strconv"
@@ -14,9 +15,11 @@ import (
 )
 
 const (
-	threadCount = 10
+	threadCount = 50
 	// 建议换一个更稳定的链接测试，或者确保这个链接没过期
-	downloadUrl = "http://localhost:8090/multimedia-exp1.zip" //"http://localhost:8090/multimedia-exp1.zip"
+	//"https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
+	//"http://localhost:8090/multimedia-exp1.zip"
+	downloadUrl = "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
 	userAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
@@ -30,21 +33,43 @@ var realFileName string
 var wg sync.WaitGroup
 
 func getFileName(resp *http.Response, rawUrl string) string {
-	// 1. 尝试从 Header 中获取 (Content-Disposition: attachment; filename="docker.exe")
+	// 1. 尝试从 Header 获取
 	contentDisposition := resp.Header.Get("Content-Disposition")
 	if contentDisposition != "" {
 		parts := strings.Split(contentDisposition, "filename=")
 		if len(parts) > 1 {
-			return strings.Trim(parts[1], "\"")
+			name := strings.Trim(parts[1], "\"")
+			// Header 里的名称有时也需要 Unescape
+			decodedName, err := url.QueryUnescape(name)
+			if err == nil {
+				return decodedName
+			}
+			return name
 		}
 	}
 
-	// 2. 如果 Header 没有，从 URL 路径中提取
-	fileName := path.Base(rawUrl)
-	if fileName == "" || fileName == "." {
-		return "downloaded_file.bin" // 兜底名称
+	// 2. 从 URL 路径提取并格式化
+	// 先解析 URL 排除 Query 参数的干扰
+	u, err := url.Parse(rawUrl)
+	var rawFileName string
+	if err == nil {
+		rawFileName = path.Base(u.Path)
+	} else {
+		rawFileName = path.Base(rawUrl)
 	}
-	return fileName
+
+	// 核心步骤：将 %20 转换为 空格
+	// PathUnescape 会把 %20 转为空格，但不会把 + 转为空格（符合路径规则）
+	decodedName, err := url.PathUnescape(rawFileName)
+	if err != nil {
+		return rawFileName // 转换失败则返回原名
+	}
+
+	if decodedName == "" || decodedName == "." {
+		return "downloaded_file.bin"
+	}
+
+	return decodedName
 }
 
 func HEAD() (*http.Response, error) {
