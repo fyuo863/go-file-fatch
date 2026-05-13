@@ -91,32 +91,46 @@ jobs:
           name: downloader-${{ matrix.goos }}-${{ matrix.goarch }}
           path: output/
 
-  # ----- 自动发布到 GitHub Release -----
+# ----- 自动发布到 GitHub Release -----
   release:
     name: Create Release
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write  # 必须：允许创建 Tag 和 Release
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 必须：获取所有历史记录和标签，否则无法计算下一个版本号
+
+      # 1. 自动计算并创建 Git Tag
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch  # 默认每次成功后最后一位 +1 (1.0.x)
+          # 如果你在 commit message 里写了 "feat: ..."，它会自动变 1.1.0 (minor)
+          # 如果写了 "fix: ..."，它会变 1.0.x (patch)
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
 
+      # 2. 使用上面生成的新 Tag 创建 Release
       - name: Create Release
         uses: ncipollo/release-action@v1
         with:
           artifacts: "release-artifacts/**/*"
-          tag: v1.0.${{ github.run_number }}
-          name: Release v1.0.${{ github.run_number }}
+          # 注意：这里改用 tag_version 输出的标签
+          tag: ${{ steps.tag_version.outputs.new_tag }}
+          name: Release ${{ steps.tag_version.outputs.new_tag }}
           body: |
             自动构建的多平台下载器。
-
+            
+            - 本次更新内容：${{ steps.tag_version.outputs.changelog }}
             - 构建自 commit `${{ github.sha }}`
-            - 使用方法：`./downloader-<os>-<arch>` 即可下载测试文件。
           token: ${{ secrets.GITHUB_TOKEN }}
-          allowUpdates: false
