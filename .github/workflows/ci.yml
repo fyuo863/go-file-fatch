@@ -134,3 +134,23 @@ jobs:
             - 本次更新内容：${{ steps.tag_version.outputs.changelog }}
             - 构建自 commit `${{ github.sha }}`
           token: ${{ secrets.GITHUB_TOKEN }}
+      # 钉钉通知步骤
+      - name: Send DingTalk Notification
+        uses: northwang-lucky/chatbot-webhook-client@v1.1.1 # 建议指定版本号
+        with:
+          # 必须指定为 DingTalk
+          app: DingTalk
+          # 从 GitHub Secrets 中读取 Webhook
+          webhook: ${{ secrets.DINGTALK_WEBHOOK }}
+          # 从 GitHub Secrets 中读取加签密钥
+          secret: ${{ secrets.DINGTALK_SECRET }}
+          # 这里的 template 必须是一个标准的 JSON 字符串
+          # 我们使用 Markdown 格式让通知更美观
+          template: >-
+            {
+              "msgtype": "markdown",
+              "markdown": {
+                "title": "项目发布成功",
+                "text": "### 🚀 项目发布成功\n\n**版本号**: ${{ steps.tag_version.outputs.new_tag }}\n\n**构建状态**: Success ✅\n\n**更新说明**: \n\n ${{ steps.tag_version.outputs.changelog }}\n\n [查看 Release 详情](${{ github.event.repository.html_url }}/releases/tag/${{ steps.tag_version.outputs.new_tag }})"
+              }
+            }
