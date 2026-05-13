@@ -133,7 +133,7 @@ func GET(errCh chan error, file *os.File, start, end int) {
 		errCh <- err
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		// 处理错误
