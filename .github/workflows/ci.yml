@@ -29,7 +29,7 @@ jobs:
           cache: true  # 启用缓存以加速依赖安装
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6  # 使用 golangci-lint 进行代码检查
+        uses: golangci/golangci-lint-action@v9  # 使用 golangci-lint 进行代码检查
         with:
           version: latest  # 使用最新版本的 golangci-lint
           only-new-issues: true  # 仅报告新增问题
