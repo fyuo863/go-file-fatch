@@ -81,7 +81,7 @@ func HEAD() (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 如果支持分块下载，状态码应该是 206 Partial Content
 	if resp.StatusCode == http.StatusPartialContent {
