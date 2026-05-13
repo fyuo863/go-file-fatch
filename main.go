@@ -137,6 +137,7 @@ func GET(errCh chan error, file *os.File, start, end int) {
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		// 处理错误
+		errCh <- fmt.Errorf("error reading body: %w", err) // 加上逻辑
 	}
 	//fmt.Println("分片数据长度:", len(data))
 	//fmt.Println("🍌", resp.Body)
@@ -189,7 +190,7 @@ func main() {
 		fmt.Println("HEAD 请求失败", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	//预分配磁盘空间与文件占位
 	var tmpFileName = "file_is_downloading.tmp"
 	f, err := os.Create(tmpFileName)
@@ -226,7 +227,7 @@ func main() {
 			fmt.Println("下载过程中发生错误:", n)
 		}
 	}
-	f.Close()
+	_ = f.Close()
 	err = os.Rename(tmpFileName, realFileName)
 	if err != nil {
 		fmt.Printf("重命名失败: %v\n", err)
