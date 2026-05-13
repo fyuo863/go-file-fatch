@@ -1,0 +1,122 @@
+# GitHub Actions 工作流配置文件
+# 此文件定义了一个持续集成（CI）流程，用于检查代码质量和运行单元测试
+
+name: Multi-thread Downloader CI  # 工作流名称
+
+on:
+  push:
+    branches: [ main ]  # 当代码推送到 main 分支时触发
+  pull_request:
+    branches: [ main ]  # 当有针对 main 分支的 Pull Request 时触发
+  workflow_dispatch:   # 允许手动触发工作流
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true  # 如果有新的工作流实例启动，取消正在运行的实例
+
+jobs:
+  # ----- 代码质量检查 -----
+  lint:
+    name: Lint & Vet  # 任务名称：代码质量检查
+    runs-on: ubuntu-latest  # 指定运行环境为最新的 Ubuntu
+    steps:
+      - uses: actions/checkout@v4  # 检出代码仓库
+
+      - name: Set up Go
+        uses: actions/setup-go@v5  # 设置 Go 环境
+        with:
+          go-version: '1.26.2'  # 指定 Go 版本为 1.26.2
+          cache: true  # 启用缓存以加速依赖安装
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6  # 使用 golangci-lint 进行代码检查
+        with:
+          version: latest  # 使用最新版本的 golangci-lint
+          only-new-issues: true  # 仅报告新增问题
+
+  # ----- 单元测试（需要先为项目补充测试文件）-----
+  test:
+    name: Test  # 任务名称：单元测试
+    needs: lint  # 此任务依赖于 lint 任务，只有 lint 成功后才会运行
+    runs-on: ubuntu-latest  # 指定运行环境为最新的 Ubuntu
+    steps:
+      - uses: actions/checkout@v4  # 检出代码仓库
+
+      - name: Set up Go
+        uses: actions/setup-go@v5  # 设置 Go 环境
+        with:
+          go-version: '1.26.2'  # 指定 Go 版本为 1.26.2
+          cache: true  # 启用缓存以加速依赖安装
+
+      - name: Run tests
+        run: go test -race -v ./...  # 运行所有测试文件，启用竞态检测并输出详细日志
+
+  # ----- 跨平台构建（main 分支推送时）-----
+  build:
+    name: Build Release Binaries
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [ linux, darwin, windows ]
+        goarch: [ amd64, arm64 ]
+        exclude:
+          # 排除 darwin/arm64 以外的非主流组合（按需调整）
+          - goos: darwin
+            goarch: arm64  # 保留
+          - goos: windows
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.2'
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+          mkdir -p output
+          go build -o output/downloader-${{ matrix.goos }}-${{ matrix.goarch }}$EXT .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloader-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: output/
+
+  # ----- 自动发布到 GitHub Release -----
+  release:
+    name: Create Release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "release-artifacts/**/*"
+          tag: v1.0.${{ github.run_number }}
+          name: Release v1.0.${{ github.run_number }}
+          body: |
+            自动构建的多平台下载器。
+
+            - 构建自 commit `${{ github.sha }}`
+            - 使用方法：`./downloader-<os>-<arch>` 即可下载测试文件。
+          token: ${{ secrets.GITHUB_TOKEN }}
+          allowUpdates: false
