@@ -3,6 +3,8 @@ name: Multi-thread Downloader CI
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'  # 当推送 v 开头的标签时触发 (如 v0.0.4)
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -12,27 +14,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ----- 代码质量检查 -----
+  # 1. 代码检查 (任何推送都运行)
   lint:
     name: Lint & Vet
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.26.2'
           cache: true
-
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          # 明确指定 v2.12.2 以完美支持 Go 1.26.2
           version: v2.12.2
           only-new-issues: true
 
-  # ----- 单元测试 -----
+  # 2. 单元测试 (任何推送都运行)
   test:
     name: Test
     needs: lint
@@ -47,18 +46,17 @@ jobs:
       - name: Run tests
         run: go test -race -v ./...
 
-  # ----- 跨平台构建 -----
+  # 3. 跨平台构建 (仅在 main 分支推送或推送标签时运行)
   build:
-    name: Build Release Binaries
+    name: Build Binaries
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     strategy:
       matrix:
         goos: [ linux, darwin, windows ]
         goarch: [ amd64, arm64 ]
         exclude:
-          # 仅排除 windows/arm64，保留 darwin/arm64 (Mac M1/M2)
           - goos: windows
             goarch: arm64
     steps:
@@ -79,26 +77,17 @@ jobs:
           name: downloader-${{ matrix.goos }}-${{ matrix.goarch }}
           path: output/
 
-  # ----- 自动发布到 GitHub Release -----
+  # 4. 发布 Release (【关键】仅在推送 v* 标签时运行)
   release:
     name: Create Release
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Bump version and push tag
-        id: tag_version
-        uses: mathieudutour/github-tag-action@v6.2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: patch
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -109,28 +98,27 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           artifacts: "release-artifacts/**/*"
-          tag: ${{ steps.tag_version.outputs.new_tag }}
-          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          # 使用你手动打的标签名 (例如 v0.0.4)
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
           body: |
-            自动构建的多平台下载器。
-            
-            - 更新内容：${{ steps.tag_version.outputs.changelog }}
+            手动发布的正式版本。
             - 构建自 commit `${{ github.sha }}`
+            - 平台：Windows, Linux, MacOS (Intel/M-series)
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 钉钉通知步骤（已修复 JSON 报错风险）
+      # 5. 钉钉通知 (仅在 Release 成功后发送)
       - name: Send DingTalk Notification
         uses: northwang-lucky/chatbot-webhook-client@v1.1.1
         with:
           app: DingTalk
           webhook: ${{ secrets.DINGTALK_WEBHOOK }}
           secret: ${{ secrets.DINGTALK_SECRET }}
-          # 修复点：移除了 template 里的 changelog 变量，防止换行符导致 JSON 破损
           template: >-
             {
               "msgtype": "markdown",
               "markdown": {
                 "title": "项目发布成功",
-                "text": "### 🚀 项目发布成功\n\n**版本号**: ${{ steps.tag_version.outputs.new_tag }}\n\n**构建状态**: Success ✅\n\n[点击查看版本详情与下载](${{ github.event.repository.html_url }}/releases/tag/${{ steps.tag_version.outputs.new_tag }})"
+                "text": "### 🚀 项目 [${{ github.event.repository.name }}] 手动发布成功\n\n**版本号**: ${{ github.ref_name }}\n\n**构建状态**: 已完成所有平台编译 ✅\n\n[点击查看版本详情与下载](${{ github.event.repository.html_url }}/releases/tag/${{ github.ref_name }})"
               }
             }
