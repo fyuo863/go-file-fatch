@@ -26,7 +26,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.2' # 保持你的版本要求
+          go-version: '1.24' # 保持你的版本要求
           cache: true
 
       - name: golangci-lint
@@ -48,7 +48,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.2'
+          go-version: '1.24'
           cache: true
       - name: Run tests
         run: go test -race -v ./...
@@ -71,7 +71,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.2'
+          go-version: '1.24'
       - name: Build binary
         run: |
           EXT=""
