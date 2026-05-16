@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -23,7 +24,7 @@ const (
 	userAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
-var Resp struct {
+var Inf struct {
 	AcceptRanges  uint
 	ContentLength int
 }
@@ -73,10 +74,12 @@ func getFileName(resp *http.Response, rawUrl string) string {
 }
 
 func HEAD() (*http.Response, error) {
+	//设置请求头，模拟浏览器行为，获取文件信息
 	req, _ := http.NewRequest("GET", downloadUrl, nil)
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Range", "bytes=0-0")
 
+	//Do发送请求，获取响应
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -103,18 +106,18 @@ func HEAD() (*http.Response, error) {
 				fmt.Println("转换 Content-Length 失败:", err)
 				return nil, err
 			}
-			Resp.ContentLength = ContentLength
+			Inf.ContentLength = ContentLength
 		}
 		fmt.Println("🌰:", test)
 
-		Resp.AcceptRanges = http.StatusPartialContent
+		Inf.AcceptRanges = http.StatusPartialContent
 		// 从 contentRange 中解析出总大小...
 	}
 	realFileName = getFileName(resp, downloadUrl)
 	return resp, err
 }
 
-func GET(errCh chan error, file *os.File, start, end int) {
+func GET(ctx context.Context, errCh chan error, file *os.File, start, end int) {
 	// 创建一个 GET 请求
 	req, err := http.NewRequest(http.MethodGet, downloadUrl, nil)
 	if err != nil {
@@ -129,9 +132,14 @@ func GET(errCh chan error, file *os.File, start, end int) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("请求失败:", err)
-		errCh <- err
-		return
+		select {
+		case <-ctx.Done():
+			// 如果是因为 Context 取消导致的报错，不需要发给 errCh
+			return
+		default:
+			errCh <- err
+			return
+		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(resp.Body)
@@ -156,12 +164,12 @@ func GET(errCh chan error, file *os.File, start, end int) {
 	}
 }
 
-func DownloadManager(errCh chan error, file *os.File, a int) {
-	if Resp.AcceptRanges == 0 {
+func DownloadManager(ctx context.Context, errCh chan error, file *os.File, a int) {
+	if Inf.AcceptRanges == 0 {
 		fmt.Println("不支持断点续传，退化成普通下载")
 		a = 1
 	}
-	bytes := Resp.ContentLength
+	bytes := Inf.ContentLength
 	fmt.Println(a, bytes, bytes/a)
 	for i := 0; i < a; i++ {
 		start := i * bytes / a
@@ -173,18 +181,22 @@ func DownloadManager(errCh chan error, file *os.File, a int) {
 		wg.Add(1)
 		go func(start, end int) {
 			defer wg.Done()
-			GET(errCh, file, start, end)
+			GET(ctx, errCh, file, start, end)
 		}(start, end)
 	}
 }
 
 func main() {
-	// 创建一个 HEAD 请求
+	//创建一个带有超时的上下文，防止下载过程无限挂起
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	//错误通道，获取每个协程的错误信息
 	errCh := make(chan error, threadCount)
 
+	// 创建一个 HEAD 请求, 由于某些网站不允许用HEAD方法获取文件信息，所以这里用GET方法请求一个字节来获取文件信息
 	resp, err := HEAD()
 
-	fmt.Println("🍍", Resp)
+	fmt.Println("🍍", Inf)
 
 	if resp == nil {
 		fmt.Println("HEAD 请求失败", err)
@@ -198,9 +210,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("resp:%T", Resp.ContentLength)
+	fmt.Printf("resp:%T", Inf.ContentLength)
 	// 预分配磁盘空间（非常重要：防止下载中途磁盘满，且减少文件碎片）
-	err = f.Truncate(int64(Resp.ContentLength))
+	err = f.Truncate(int64(Inf.ContentLength))
 	if err != nil {
 		log.Fatal("无法预分配空间:", err)
 	}
@@ -216,7 +228,7 @@ func main() {
 	defer func() {
 		fmt.Printf("总耗时: %s\n", time.Since(start))
 	}()
-	DownloadManager(errCh, f, threadCount)
+	DownloadManager(ctx, errCh, f, threadCount)
 
 	// 等待所有协程完成
 	wg.Wait()
@@ -234,4 +246,8 @@ func main() {
 		return
 	}
 	fmt.Println("下载完成")
+
 }
+
+//下一步尝试流式接口执行
+//x.Download("url").To("/file").WithThreads(10).Start()
