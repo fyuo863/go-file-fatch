@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const defaultThreadCount = 10
+const defaultThreadCount = 5
 
 var Wg sync.WaitGroup
 
@@ -18,18 +18,14 @@ var Wg sync.WaitGroup
 func (m *FileMetadata) DownloadManager() (chan error, *os.File, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 
-	tmpFileName := "file_is_downloading.tmp"
+	tmpFileName := m.FileName + ".tmp"
+	if m.FileName == "" {
+		tmpFileName = "file_is_downloading.tmp"
+	}
 	f, err := os.Create(tmpFileName)
 	if err != nil {
 		cancel()
 		return nil, nil, err
-	}
-
-	err = f.Truncate(m.Size)
-	if err != nil {
-		cancel()
-		f.Close()
-		return nil, nil, fmt.Errorf("无法预分配空间: %w", err)
 	}
 
 	threadCount := defaultThreadCount
@@ -58,7 +54,6 @@ func (m *FileMetadata) DownloadManager() (chan error, *os.File, error) {
 		f.Close()
 		if err := os.Rename(tmpFileName, m.FileName); err != nil {
 			errCh <- fmt.Errorf("重命名失败: %w", err)
-			// 调试信息
 			fmt.Printf("重命名失败: 临时文件: %s, 目标文件: %s, 错误: %v\n", tmpFileName, m.FileName, err)
 		}
 		close(errCh)
@@ -95,14 +90,22 @@ func (m *FileMetadata) getChunk(ctx context.Context, errCh chan<- error, file *o
 		return
 	}
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		errCh <- fmt.Errorf("error reading body: %w", err)
-		return
-	}
-
-	_, err = file.WriteAt(data, int64(start))
-	if err != nil {
-		errCh <- fmt.Errorf("写入失败: %w", err)
+	buf := make([]byte, 32*1024)
+	offset := int64(start)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := file.WriteAt(buf[:n], offset); writeErr != nil {
+				errCh <- fmt.Errorf("写入失败: %w", writeErr)
+				return
+			}
+			offset += int64(n)
+		}
+		if readErr != nil {
+			if readErr != io.EOF {
+				errCh <- fmt.Errorf("读取失败: %w", readErr)
+			}
+			break
+		}
 	}
 }
