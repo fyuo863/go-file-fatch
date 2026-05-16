@@ -27,11 +27,20 @@ func main() {
 	fmt.Printf("File: %s, Size: %d, AcceptRanges: %v\n", meta.FileName, meta.Size, meta.AcceptRanges)
 	//获得了信息
 	//调用manager分配下载任务
-	meta.DownloadManager()
-	//downloader.Wg.Wait()
-	// err = os.Rename(tmpFileName, m.FileName)
-	// if err != nil {
-	// 	fmt.Printf("重命名失败: %v\n", err)
-	// 	return errCh, f, nil // 返回错误通道和文件句柄，允许调用者处理后续清理
-	// }
+	errCh, file, err := meta.DownloadManager()
+	if err != nil {
+		fmt.Printf("DownloadManager error: %v\n", err)
+		return
+	}
+
+	// 监听错误通道
+	go func() {
+		for err := range errCh {
+			fmt.Printf("下载错误: %v\n", err)
+		}
+	}()
+
+	// 等待所有下载完成
+	downloader.Wg.Wait()
+	fmt.Printf("下载完成: %s\n", file.Name())
 }

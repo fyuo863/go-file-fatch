@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const defaultThreadCount = 50
+const defaultThreadCount = 5
 
 var Wg sync.WaitGroup
 
@@ -58,6 +58,8 @@ func (m *FileMetadata) DownloadManager() (chan error, *os.File, error) {
 		f.Close()
 		if err := os.Rename(tmpFileName, m.FileName); err != nil {
 			errCh <- fmt.Errorf("重命名失败: %w", err)
+			// 调试信息
+			fmt.Printf("重命名失败: 临时文件: %s, 目标文件: %s, 错误: %v\n", tmpFileName, m.FileName, err)
 		}
 		close(errCh)
 		cancel()
