@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -57,7 +58,10 @@ func (m *FileMetadata) DownloadManager() (chan error, *os.File, error) {
 
 	go func() {
 		Wg.Wait()
-		f.Close()
+		if err := f.Close(); err != nil {
+			// 打印日志或返回错误
+			log.Printf("failed to close file: %v", err)
+		}
 		if err := os.Rename(tmpFileName, m.FileName); err != nil {
 			errCh <- fmt.Errorf("重命名失败: %w", err)
 			fmt.Printf("重命名失败: 临时文件: %s, 目标文件: %s, 错误: %v\n", tmpFileName, m.FileName, err)
@@ -89,7 +93,9 @@ func (m *FileMetadata) getChunk(ctx context.Context, errCh chan<- error, file *o
 			return
 		}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
 		errCh <- fmt.Errorf("分片 %d-%d 下载失败，状态码: %s", start, end, resp.Status)

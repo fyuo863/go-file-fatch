@@ -49,7 +49,9 @@ func (f *HttpFetcher) Fetch(ui UrlInfo) (*FileMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// 2. 初始化元数据
 	meta := &FileMetadata{
