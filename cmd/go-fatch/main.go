@@ -33,14 +33,9 @@ func main() {
 		return
 	}
 
-	// 监听错误通道
-	go func() {
-		for err := range errCh {
-			fmt.Printf("下载错误: %v\n", err)
-		}
-	}()
-
-	// 等待所有下载完成
-	downloader.Wg.Wait()
+	// 从 errCh 读取直到关闭，errCh 关闭意味着所有工作（包括重命名）已完成
+	for err := range errCh {
+		fmt.Printf("下载错误: %v\n", err)
+	}
 	fmt.Printf("下载完成: %s\n", file.Name())
 }

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const defaultThreadCount = 5
+const defaultThreadCount = 10
 
 var Wg sync.WaitGroup
 
