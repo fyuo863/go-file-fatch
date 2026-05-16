@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"go-fatch/internal/monitor"
 	"net/http"
 	"net/url"
 	"path"
@@ -19,6 +20,7 @@ type FileMetadata struct {
 	FileName     string
 	Size         int64
 	AcceptRanges bool
+	tracker      *monitor.ProgressTracker
 }
 
 type UrlInfo struct {

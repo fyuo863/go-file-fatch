@@ -8,6 +8,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"go-fatch/internal/monitor"
 )
 
 const defaultThreadCount = 5
@@ -35,6 +37,10 @@ func (m *FileMetadata) DownloadManager() (chan error, *os.File, error) {
 
 	bytes := int(m.Size)
 	errCh := make(chan error, threadCount)
+
+	m.tracker = monitor.NewProgressTracker(m.Size)
+	//开启一个进度条协程
+	go m.tracker.Run(ctx)
 
 	for i := 0; i < threadCount; i++ {
 		start := i * bytes / threadCount
@@ -72,7 +78,7 @@ func (m *FileMetadata) getChunk(ctx context.Context, errCh chan<- error, file *o
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 	req.Header.Set("User-Agent", m.UserAgent)
 
-	client := &http.Client{} // 超时由 context 控制
+	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
 		select {
@@ -99,6 +105,7 @@ func (m *FileMetadata) getChunk(ctx context.Context, errCh chan<- error, file *o
 				errCh <- fmt.Errorf("写入失败: %w", writeErr)
 				return
 			}
+			m.tracker.Add(int64(n))
 			offset += int64(n)
 		}
 		if readErr != nil {
