@@ -77,7 +77,7 @@ func (m *FileMetadata) getChunk(ctx context.Context, errCh chan<- error, file *o
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 	req.Header.Set("User-Agent", m.UserAgent)
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{} // 超时由 context 控制
 	resp, err := client.Do(req)
 	if err != nil {
 		select {
