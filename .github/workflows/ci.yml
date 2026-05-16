@@ -26,17 +26,18 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24' # 保持你的版本要求
+          # 关键：必须设置为 1.26.2，因为你的代码声明了需要它
+          go-version: '1.26.2' 
           cache: true
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          # 【关键修复】：增加 --go=1.24 参数，强制 linter 忽略版本过高的问题
-          # 同时添加 ./... 确保它能扫描到所有子目录
-          args: --timeout=5m --go=1.24
-          only-new-issues: false 
+      # 【核心解决点】：不再使用 golangci-lint-action，而是现场安装
+      # 这样编译出来的 linter 就能识别 Go 1.26 的代码
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: Run golangci-lint
+        # 使用 ./... 确保扫描所有目录
+        run: $(go env GOPATH)/bin/golangci-lint run --timeout=10m ./...
 
   # 2. 单元测试
   test:
@@ -48,7 +49,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26.2'
           cache: true
       - name: Run tests
         run: go test -race -v ./...
@@ -71,13 +72,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26.2'
       - name: Build binary
         run: |
           EXT=""
           if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
           mkdir -p output
-          # 确保路径指向 main.go 所在的 cmd/go-fatch
+          # 确保路径指向 main.go 所在的子目录
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o output/downloader-${{ matrix.goos }}-${{ matrix.goarch }}$EXT ./cmd/go-fatch
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -122,6 +123,6 @@ jobs:
               "msgtype": "markdown",
               "markdown": {
                 "title": "项目发布成功",
-                "text": "### 🚀 项目 [${{ github.event.repository.name }}] 发布成功\n\n**版本**: ${{ github.ref_name }}\n\n[查看版本详情](${{ github.event.repository.html_url }}/releases/tag/${{ github.ref_name }})"
+                "text": "### 🚀 项目 [${{ github.event.repository.name }}] 发布成功\n\n**版本**: ${{ github.ref_name }}\n\n[点击前往 GitHub 查看详情](${{ github.event.repository.html_url }}/releases/tag/${{ github.ref_name }})"
               }
             }
