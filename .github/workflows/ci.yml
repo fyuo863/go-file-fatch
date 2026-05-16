@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     tags:
-      - 'v*'  # 当推送 v 开头的标签时触发 (如 v0.0.4)
+      - 'v*'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -14,27 +14,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 1. 代码检查 (任何推送都运行)
+  # 1. 代码检查
   lint:
     name: Lint & Vet
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 关键：拉取所有历史，用于 lint 对比
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.2'
+          go-version: '1.26.2' # 保留要求的版本
           cache: true
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.12.2
-          only-new-issues: false # 建议设为 false，检查所有代码
 
-  # 2. 单元测试 (任何推送都运行)
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6 # 建议升级到 v6 兼容性更好
+        with:
+          version: latest # 使用最新稳定版 linter 避免版本冲突
+          args: --timeout=5m
+          only-new-issues: false 
+
+  # 2. 单元测试
   test:
     name: Test
     needs: lint
@@ -47,9 +49,10 @@ jobs:
           go-version: '1.26.2'
           cache: true
       - name: Run tests
+        # ./... 会自动递归查找 internal 和 cmd 下的所有测试
         run: go test -race -v ./...
 
-  # 3. 跨平台构建 (仅在 main 分支推送或推送标签时运行)
+  # 3. 跨平台构建
   build:
     name: Build Binaries
     needs: test
@@ -73,14 +76,15 @@ jobs:
           EXT=""
           if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
           mkdir -p output
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o output/downloader-${{ matrix.goos }}-${{ matrix.goarch }}$EXT .
+          # 【关键修改】：将编译目标从 . 改为 ./cmd/go-fatch
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o output/downloader-${{ matrix.goos }}-${{ matrix.goarch }}$EXT ./cmd/go-fatch
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: downloader-${{ matrix.goos }}-${{ matrix.goarch }}
           path: output/
 
-  # 4. 发布 Release (【关键】仅在推送 v* 标签时运行)
+  # 4. 发布 Release
   release:
     name: Create Release
     needs: build
@@ -101,16 +105,19 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           artifacts: "release-artifacts/**/*"
-          # 使用你手动打的标签名 (例如 v0.0.4)
           tag: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           body: |
-            手动发布的正式版本。
-            - 构建自 commit `${{ github.sha }}`
-            - 平台：Windows, Linux, MacOS (Intel/M-series)
+            ## 🚀 Downloader 自动发布
+            构建自 commit: `${{ github.sha }}`
+            
+            ### 支持平台
+            - Windows (amd64)
+            - Linux (amd64, arm64)
+            - macOS (amd64, arm64)
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 5. 钉钉通知 (仅在 Release 成功后发送)
+      # 5. 钉钉通知
       - name: Send DingTalk Notification
         uses: northwang-lucky/chatbot-webhook-client@v1.1.1
         with:
@@ -122,6 +129,6 @@ jobs:
               "msgtype": "markdown",
               "markdown": {
                 "title": "项目发布成功",
-                "text": "### 🚀 项目 [${{ github.event.repository.name }}] 手动发布成功\n\n**版本号**: ${{ github.ref_name }}\n\n**构建状态**: 已完成所有平台编译 ✅\n\n[点击查看版本详情与下载](${{ github.event.repository.html_url }}/releases/tag/${{ github.ref_name }})"
+                "text": "### 🚀 项目 [${{ github.event.repository.name }}] 发布成功\n\n**版本**: ${{ github.ref_name }}\n\n**状态**: 构建并上传至 Release ✅\n\n[点击前往 GitHub 查看](${{ github.event.repository.html_url }}/releases/tag/${{ github.ref_name }})"
               }
             }
