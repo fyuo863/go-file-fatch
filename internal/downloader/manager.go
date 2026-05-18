@@ -73,6 +73,7 @@ func (m *FileMetadata) DownloadManager() (chan error, *os.File, error) {
 	return errCh, f, nil
 }
 
+// getChunk 下载指定范围的文件分片，并写入文件
 func (m *FileMetadata) getChunk(ctx context.Context, errCh chan<- error, file *os.File, start, end int) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.Url, nil)
 	if err != nil {
